@@ -70,21 +70,8 @@ Accuracy will be assessed by entering it into the competition where the test dat
 
 The top score so far is a classification rate of 82.94%.
 
-<center>
-## Thank You
-</center>
-
-The data is available from my github if anyone wants to explore it or have a go
-
-<center>
-https://github.com/alexdoyle115/C7084_Big_Data
-</center>
-
-
 
 All data sourced from [DrivenData](https://www.drivendata.org/competitions/7/pump-it-up-data-mining-the-water-table/)
 
-<center>
-![Source: flickr user [**cristopherjensen**](https://www.flickr.com/photos/christophercjensen/3559607145).](/Users/alexd/Desktop/C7084-Assignment/img.jpg){width=50%}
-</center>
+![Source: flickr user [**cristopherjensen**](https://www.flickr.com/photos/christophercjensen/3559607145).](./Graphics/img.jpg)
 
