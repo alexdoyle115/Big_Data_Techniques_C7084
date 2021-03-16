@@ -73,5 +73,5 @@ The top score so far is a classification rate of 82.94%.
 
 All data sourced from [DrivenData](https://www.drivendata.org/competitions/7/pump-it-up-data-mining-the-water-table/)
 
-![Source: flickr user [**cristopherjensen**](https://www.flickr.com/photos/christophercjensen/3559607145).](./Graphics/img.jpg)
+![Source: flickr user [**cristopherjensen**](https://www.flickr.com/photos/christophercjensen/3559607145)](./Graphics/img.jpg)
 
