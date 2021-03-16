@@ -46,7 +46,7 @@ The aim is to gain a smart understanding of which waterpoints will fail and impr
 * `Test set values` - 14,851 rows recording individual waterpoints across 39 variables
 
 <center>
-![Training Data Wells](.Graphics/wells.png)
+![Training Data Wells](./Graphics/wells.png)
 </center>
 
 ## Big Data 
