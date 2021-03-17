@@ -112,7 +112,6 @@ To take this into account a local spark connection will be used to simulate usin
 
 I aim to use machine learning techniques to develop a classifier to predict the state of the wells in Tanzania.
 
-Random 
 
 Using `spraklyr` and the `random_forest_classifier` function to develop a prediction model using random forest.  
 
