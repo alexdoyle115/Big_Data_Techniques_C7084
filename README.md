@@ -97,6 +97,7 @@ The aim is to gain a smart understanding of which waterpoints will fail and impr
 |----------------------|----------------------------------------------------------|
 | id                   | Identification number of the well                        |
 | status_group         | Condition of the well                                    | 
+
 ## Big Data 
 
 While this data would not be considered "Big Data" the technology for data input is scalable and therefore could quickly become too much for a single machine to handle. 
@@ -123,4 +124,5 @@ The top score so far is a classification rate of 82.94%.
 All data sourced from [DrivenData](https://www.drivendata.org/competitions/7/pump-it-up-data-mining-the-water-table/)
 
 ![Source: flickr user cristopherjensen](./Graphics/img.jpg)
+Source: flickr user cristopherjensen
 
