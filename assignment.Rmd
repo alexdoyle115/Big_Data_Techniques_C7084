@@ -1,0 +1,806 @@
+---
+title: "Tanzanian Waterpoints"
+author: "Alex Doyle"
+date: "15/04/2021"
+output: pdf_document
+---
+
+https://github.com/alexdoyle115/C7084_Big_Data
+
+# Pump it Up : Data Mining the Water Table 
+
+
+
+
+## Table of Contents 
+
+1.0 Background
+
+2.0 Methods
+
+3.0 Results
+
+4.0 Discussion 
+
+5.0 Literature
+
+\newpage
+
+## 1.0 Background
+
+
+
+Access to clean water is something many of us take for granted in the Northern hemisphere but water related disease kill 3.4 million people every year (Kausley *et al*, 2018). Historically development agencies have combated this by providing infrastructure such as handpumps. In Sub-Saharan Africa, it is estimated 184 million people rely on hand pumps for their water supply (MacArthur, 2018), little attention has been paid to their sustainability or maintenance. 
+The Taarifa project began in 2012 at the World Bank's Water Hackathon with an aim to help deliver clean water to communities. Since winning the London Hackathon it has been developed into a platform that allows civilians to report infrastructure issues and track their resolution. According to their Github page the API has been deployed in Uganda, Ghana, and Tanzania. A huge benefit of the Taarifa is the Water Point Mapping (WPM) its main distribution (also named Waterpoints) allows. WPM is defined involves surveying the geographical positions of all improved water points in the area as well as information regarding management, technical specifications the local demographic and the functional status of the waterpoint (Wateraid, ODI 2005). This has resulted in the Taarifa Waterpoints amassing a sizable dataset almost 60,000 entries. 
+To make use of this data set a competition was created in conjunction with DrivenData. DrivenData is a website that focuses on running data science competitions that emphasize social change. Previous competitions include [using AI to identify wildlife from camera traps in the Serengeti](https://www.drivendata.org/competitions/59/camera-trap-serengeti/) (winning team achieved 86% accuracy) and [using Yelp reviews to predict health code violations](https://www.drivendata.org/competitions/5/keeping-it-fresh-predict-restaurant-inspections/). 
+The aim of the challenge is to use the 40 variables to predict the status of the test wells across Tanzania. The well status is split into 3 sections, 
+
+* `functional` -  the waterpoint is operational and there are no repairs needed.
+
+* `functional needs repair` - the waterpoint is operational, but needs repairs.
+
+* `non functional` - the waterpoint is not operational.
+
+
+This challenge is relatively straightforward, but it is worth noting that while the data currently is not considered to be "big data" there is potential there. The Taarifa waterpoints distribution is certainly scalable and applicable in countries outside of Sub-Saharan Africa. Therefore, it is foreseeable that scaling out will be the only option or at least drastically speed up the compute time.
+
+
+The main objectives of this analysis are to 
+
+* Create a classifier using Random Forest to predict the status of wells in Tanzania. 
+
+* Use the model to show what variables are the most important.
+
+* Carry out analysis in a Spark Connection.
+
+
+## 2.0 Methods
+
+### 2.1 The Data
+
+All the data for this analysis comes from the DrivenData: Pump it up Challenge 
+
+(https://www.drivendata.org/competitions/7/pump-it-up-data-mining-the-water-table/page/23/)
+ 
+ It is also available from my [Github page](https://github.com/alexdoyle115/C7084_Big_Data)
+
+* `Training set values` - 59,401 rows, recording individual waterpoints across 39 variables
+
+* `Training set labels` - 59,401 rows containing 2 variables `id` and `status_group`
+
+* `Test set values` - 14,851 rows recording individual waterpoints across 39 variables
+
+\newpage
+
+`Training set values`
+
+| Column Name          | Description                                              |
+|----------------------|----------------------------------------------------------|
+|id                    | Identification number of the well                        |
+|amount_tsh            | Total static head (amount water available to waterpoint) | 
+|date_recorded         | The date the row was entered                             |
+|funder                | Who funded the well                                      |
+|gps_height            | Altitude of the well                                     |
+|installer             | Organization that installed the well                     |
+|longitude             | GPS coordinate                                           | 
+|latitude              | GPS coordinate                                           |
+|wpt_name              | Name of the waterpoint if there is one                   |    
+|num_private           |                                                          |
+|basin                 | Geographic water basin                                   |
+|subvillage            | Geographic location                                      |
+|region                | Geographic location                                      |
+|region_code           | Geographic location (coded)                              |
+|district_code         | Geographic location (coded)                              |
+|lga                   | Geographic location                                      |
+|ward                  | Geographic location                                      |
+|population            | Population around the well                               |
+|public_meeting        | True/False                                               |
+|recorded_by           | Group entering this row of data                          |
+|scheme_management     | Who operates the waterpoint                              | 
+|scheme_name           | Who operates the waterpoint                              |
+|permit                | If the waterpoint is permitted                           |
+|construction_year     | Year the waterpoint was constructed                      |
+|extraction_type       | The kind of extraction the waterpoint uses               |
+|extraction_type_group | The kind of extraction the waterpoint uses               |
+|extraction_type_class | The kind of extraction the waterpoint uses               |
+|management            | How the waterpoint is managed                            |
+|management_group      | How the waterpoint is managed                            |
+|payment               | What the water costs                                     |
+|payment_type          | What the water costs                                     |
+|water_quality         | The quality of the water                                 |
+|quality_group         | The quality of the water                                 |
+|quantity              | The quantity of water                                    |
+|quantity_group        | The quantity of water                                    |
+|source                | The source of the water                                  |
+|source_type           | The source of the water                                  |
+|source_class          | The source of the water                                  |
+|waterpoint_type       | The kind of waterpoint                                   |
+|waterpoint_type_group | The kind of waterpoint                                   |
+
+`training set labels`
+
+| Column Name          | Description                                              |
+|----------------------|----------------------------------------------------------|
+| id                   | Identification number of the well                        |
+| status_group         | Condition of the well                                    | 
+
+\newpage
+
+On an initial look at the data it seems that there is some repetition within the variables for example there are 3 different variables outlining the source, 2 outlining the quality and 7 (not including longitude and latitude) based on the geographic location. It also appears that most columns are discrete variables which will impact the results as it influences how the importance will be assigned. 
+
+
+```{r libraries, include=FALSE}
+library(sparklyr)
+library(dplyr)
+library(ggplot2)
+library(corrr)
+library(dbplot)
+library(ggmosaic)
+library(forcats)
+library(tidyr)
+library(lubridate)
+library(readr)
+```
+
+
+```{r spark connection, include=FALSE}
+sc <- spark_connect(master = "local", version = "2.3")
+```
+
+```{r loading data, include=FALSE}
+# loading in the data as well as the labels that indicate the states of the various wells
+# the data is loaded from Github
+waterpoints <- copy_to(sc, read_csv('https://raw.githubusercontent.com/alexdoyle115/C7084_Big_Data/main/Waterpoints_Data/training_set_values/training.csv', col_types = cols(date_recorded = col_datetime())))
+
+labels<- copy_to(sc, readr::read_csv('https://raw.githubusercontent.com/alexdoyle115/C7084_Big_Data/main/Waterpoints_Data/training_set_labels/0bf8bc6e-30d0-4c50-956a-603fc693d966.csv'))
+
+test_data <- copy_to(sc, read_csv('https://raw.githubusercontent.com/alexdoyle115/C7084_Big_Data/main/Waterpoints_Data/test_set_values/702ddfc5-68cd-4d1d-a0de-f5f566f76d91.csv', col_types = cols(date_recorded = col_datetime())))
+
+
+```
+
+```{r joining, include=FALSE}
+
+# Joining the labels and the values together
+waterpoints <- waterpoints %>%
+  full_join(labels, by = "id") %>% 
+  filter(!is.na(date_recorded)) # much easier to deal with the date_recorded variable
+```
+
+Fig. 2.1 
+
+```{r well status graph, echo= FALSE}
+# Visualizing the state of the wells 
+waterpoints %>%
+  ggplot(aes(status_group, fill = status_group)) + 
+  geom_bar(stat = "count", width = .55, color = c("functional" = "#17423e", "functional needs repair"  = "#f0bf0c", "non functional" = "#a8210a")) +
+  scale_fill_manual(values = c("functional" = "#3caea3", "functional needs repair"  = "#f6d55c", "non functional" = "#ed553b", "#a8210a" = "Tanzanian Well Conditions")) +
+  labs(title = "Tanzanian Well Conditions", 
+       subtitle = "The condition of Tanzanian wells as reported to the Taarifa Waterpoints organisation.",
+       x = "Well Status", 
+       y = "Number of Wells", 
+       caption = "Alex Doyle | DrivenData | TaarifaWaterpoints") +
+  theme_minimal() + 
+  theme(plot.background = element_rect(fill = "white"), 
+        panel.background = element_rect(fill = "white",
+                                        colour = "white",
+                                size = 0.5, linetype = "solid"),
+        legend.position = "none")
+
+
+```
+
+### 2.2 Feature Engineering
+
+The first variables that we will look at is the `latitude` and `longitude`, together these give an exact location of each well across Tanzania. Unfortunately, there are 1812 rows with longitude equal to 0 and latitude equal to -0.00000002. These inputs account for a proportion of the data with no values for the population and construction year. To combat the missing longitudes and latitudes the mean geographical point of each region is calculated, and these values are used to replace the missing values of each point. The mean locations of each region are included in the table below. 
+
+```{r, mean location, include = FALSE}
+waterpoints %>%
+  group_by(region) %>%
+  summarise_at(vars(latitude, longitude), mean) %>%
+  ungroup()
+```
+
+\newpage
+
+```{r mutated long and lat, include=FALSE}
+# Updating the longitude and latitudes
+waterpoints <- waterpoints %>%
+  mutate(newlongitude = case_when(longitude == 0 & region == "Arusha" ~ 36.55407, 
+                                  longitude == 0 & region == "Dar es Saleem" ~ 39.21294,
+                                  longitude == 0 & region == "Dodoma" ~ 36.04196,
+                                  longitude == 0 & region == "Iringa" ~ 34.89592,
+                                  longitude == 0 & region == "Kagera" ~ 31.23309,
+                                  longitude == 0 & region == "Kigoma" ~30.21889,
+                                  longitude == 0 & region == "Kilimanjaro" ~ 37.50546,
+                                  longitude == 0 & region == "Lindi" ~ 38.98799,
+                                  longitude == 0 & region == "Manyara" ~ 35.92932,
+                                  longitude == 0 & region == "Mara" ~ 34.15698,
+                                  longitude == 0 & region == "Mbeya" ~ 33.53351,
+                                  longitude == 0 & region == "Morogoro" ~ 37.04678,
+                                  longitude == 0 & region == "Mtwara" ~ 37.38862,
+                                  longitude == 0 & region == "Mwanza" ~ 33.09477,
+                                  longitude == 0 & region == "Pwani" ~ 38.88372,
+                                  longitude == 0 & region == "Rukwa" ~ 31.29116,
+                                  longitude == 0 & region == "Ruvuma" ~ 35.72784,
+                                  longitude == 0 & region == "Shinyanga" ~ 33.24037,
+                                  longitude == 0 & region == "Singida" ~ 37.3950,
+                                  longitude == 0 & region == "Tabora" ~ 32.87830,
+                                  longitude == 0 & region == "Tanga" ~ 38.50195, 
+                                  TRUE ~ longitude
+                                  )) %>%
+  mutate(newlatitude = case_when(latitude == -0.00000002 & region == "Arusha" ~ -3.2464455, 
+                                  latitude == -0.00000002 & region == "Dar es Saleem" ~ -6.909677,
+                                  latitude == -0.00000002 & region == "Dodoma" ~ -5.928734,
+                                  latitude == -0.00000002 & region == "Iringa" ~ -8.907700,
+                                  latitude == -0.00000002 & region == "Kagera" ~ -1.961466,
+                                  latitude == -0.00000002 & region == "Kigoma" ~ -4.296219,
+                                  latitude == -0.00000002 & region == "Kilimanjaro" ~ -3.522823,
+                                  latitude == -0.00000002 & region == "Lindi" ~ -9.775687,
+                                  latitude == -0.00000002 & region == "Manyara" ~ -4.256211,
+                                  latitude == -0.00000002 & region == "Mara" ~ -1.739903,
+                                  latitude == -0.00000002 & region == "Mbeya" ~ -9.097418,
+                                  latitude == -0.00000002 & region == "Morogoro" ~ -7.411562,
+                                  latitude == -0.00000002 & region == "Mtwara" ~ --10.680456,
+                                  latitude == -0.00000002 & region == "Mwanza" ~ -1.938766,
+                                  latitude == -0.00000002 & region == "Pwani" ~ -7.009954,
+                                  latitude == -0.00000002 & region == "Rukwa" ~ -7.359283,
+                                  latitude == -0.00000002 & region == "Ruvuma" ~ -10.774379,
+                                  latitude == -0.00000002 & region == "Shinyanga" ~ -2.790522,
+                                  latitude == -0.00000002 & region == "Singida" ~ -4.9046622,
+                                  latitude == -0.00000002 & region == "Tabora" ~ -4.722600,
+                                  latitude == -0.00000002 & region == "Tanga" ~ -5.070863,
+                                  TRUE ~ latitude
+                                  ))
+```
+
+The `date_recorded` variable on its own it not much use for prediction but parsing the dates that the waterpoints are recorded into the months or recording and the years of recording may be valuable for the model. Fig 2.2  highlights the distribution of reported wells according to the months of the year. It is interesting that certain months have big spikes but when comparing the proportions of each status group they may not have an impact on the classifier. 
+
+```{r date_recorded_training, include=FALSE}
+
+time <- waterpoints %>% 
+  select(id, date_recorded) %>%
+  mutate(B = split(date_recorded, "-")) %>%
+  sdf_separate_column("B", into = c("year", "m", "d")) %>% 
+  mutate(month = case_when(m == "01" ~ "January", 
+                           m == "02" ~ "February", 
+                           m == "03" ~ "March", 
+                           m == "04" ~ "April", 
+                           m == "05" ~ "May", 
+                           m == "06" ~ "June", 
+                           m == "07" ~ "July", 
+                           m == "08" ~ "August", 
+                           m == "09" ~ "September", 
+                           m == "10" ~ "October", 
+                           m == "11" ~ "November", 
+                           m == "12" ~ "December", 
+                           TRUE ~ m)) %>%
+  select(id, month, year)
+
+
+waterpoints <- waterpoints %>%
+  left_join(time, by = "id")
+```
+
+Fig. 2.2 Comparing monthly reports of status condition 
+```{r month graph, echo=FALSE, fig.show="hold", out.width="50%"}
+local <- waterpoints %>% 
+  collect
+
+local %>%
+  mutate(month = fct_relevel(month, c("January", 
+                       "February", 
+                       "March", 
+                       "April", 
+                       "May", 
+                       "June", 
+                       "July", 
+                       "August", 
+                       "September", 
+                       "October", 
+                       "November", 
+                       "December"))) %>% 
+ggplot(aes(month, fill = status_group)) +
+  geom_bar(position = "stack") + 
+  scale_fill_manual(values = c("#3caea3", "#f6d55c", "#ed553b"), name = "Well Status", 
+                    labels = c("Functional", "Functional Needs Repair", "Non Functional"))+
+  labs(title = "Reporting of Well Status by month", 
+       subtitle = "Number of Wells",
+       y = "Number of Wells", 
+       x = "Month")+
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        legend.position = c(0.8, 0.8)) 
+
+local %>%
+  mutate(month = fct_relevel(month, c("January", 
+                       "February", 
+                       "March", 
+                       "April", 
+                       "May", 
+                       "June", 
+                       "July", 
+                       "August", 
+                       "September", 
+                       "October", 
+                       "November", 
+                       "December"))) %>% 
+ggplot(aes(month, fill = status_group)) +
+  geom_bar(position = "fill") + 
+  scale_fill_manual(values = c("#3caea3", "#f6d55c", "#ed553b"), name = "Well Status", 
+                    labels = c("Functional", "Functional Needs Repair", "Non Functional"))+
+  labs(subtitle = "Proportion of Wells ",  
+       y = "Proportion of Wells", 
+       x = "Month", 
+       caption = "Alex Doyle | DrivenData | TaarifaWaterpoints")+
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        legend.position = "null") 
+
+```
+
+The population and construction variables have a large proportion of 0's as highlighted in Fig 2.3 (almost 1/3 in the construction year) clearly they are input if the exact information is not known making the variable not particularly useful. It may be the case that recording the construction year or population in the surrounding area may be worth nothing, so a dummy variable is created with 0 being recorded for no value present and 1 recorded for a value present.  
+
+Fig 2.3 0's within variables (Population and construction_year)
+```{r population & construction, echo = FALSE, fig.show="hold", out.width="50%"}
+# Lots of zeros in the population and construction_year variable 
+ggplot(waterpoints, aes(population)) +
+  geom_histogram(binwidth = 1000, color = "#17423e", fill = "#3caea3") +
+  labs(title  = "Proportion of 0's of population variable", 
+       x = "Population surrounding well", 
+       y = "Number of Wells") +
+  theme_classic() + 
+  theme(legend.position = "null")
+
+ggplot(waterpoints, aes(construction_year)) +
+  geom_histogram(binwidth = 20, color = "#17423e", fill = "#3caea3") +
+  labs(title  = "Proportion of 0's in construction_year variable", 
+       x = "Year Wells are Constructed", 
+       y = "Number of Wells", 
+       caption = "Alex Doyle | DrivenData | TaarifaWaterpoints") +
+  theme_classic()+ 
+  theme(legend.position = "null")
+
+waterpoints <- waterpoints %>%
+  mutate(pop_flag = ifelse(population == 0, "0", "1"))
+
+waterpoints <- waterpoints %>%
+  mutate(contstuction_flag = ifelse(construction_year == 0, "0", "1"))         
+```
+
+
+Scheme management is another variable with some potential, with several columns describing the management of the water points. The reason for exploring this column is due to not having excessive amounts of levels as well as not too many empty rows. 
+
+```{r scheme_management, include=FALSE}
+
+# There are 3,861 empty values in the scheme management variables
+waterpoints %>%
+  group_by(scheme_management) %>%
+  count()
+
+# Looking at the information there are almost 4000 NAs so it may be worth creating a variable
+
+waterpoints <- waterpoints %>%
+  na.replace(scheme_management = "NA") %>%
+  filter(scheme_management != "None")
+```
+
+
+Before training the model, its worth exploring the variables as it was previously mentioned there is some repetition between variables. Exploring the series of graphs below it is clear that when some of the variables are compared, they are the exact same while some are almost summaries of others. Fig 2.4 and Fig 2.5 below highlight some of the repetition of the variables. 
+
+Fig. 2.4. Repetition within quanitity variables and quality variables 
+```{r repetition 1 , fig.show="hold", out.width="50%" , echo=FALSE}
+# Water quality is a superior to quality group as it has more levels which may allow for accurate results
+
+waterpoints %>%
+  ggplot(aes(quality_group, water_quality, colour = quality_group)) +
+  geom_count() +
+  scale_color_manual(values = c("colored" = "#3caea3", "fluoride" = "#3caea3", "good" ="#3caea3", "milky" ="#3caea3", "salty" ="#3caea3", "unknown" ="#3caea3")) +
+  labs() +
+  theme_minimal() + 
+  labs(title = "Repetition between variables (size denotes count)", 
+       subtile = "Quality Variables") +
+  theme(legend.position = "none") 
+
+waterpoints %>%
+  ggplot(aes(quantity, quantity_group, colour = quantity )) +
+  geom_count() +
+  scale_color_manual(values = c("dry" = "#3caea3", "enough" = "#3caea3", "insufficient" ="#3caea3", "unknown" ="#3caea3", "seasonal" ="#3caea3"))+
+  labs(subtitle = "Quantity Variables", 
+       caption = "Alex Doyle | DrivenData | TaarifaWaterpoints"
+  ) +
+  theme_minimal() + 
+  theme(legend.position = "none")
+```
+
+Fig. 2.5. Repetition within quanitity variables and quality variables (contd)
+```{r repetition 2, fig.show="hold", out.width="50%", echo=FALSE, warning=FALSE}
+# The quantity group is the exact same as the quantity
+
+waterpoints %>%
+  ggplot(aes(waterpoint_type_group, waterpoint_type, color = waterpoint_type_group )) +
+  geom_count() +
+  scale_color_manual(values = c("cattle trough" = "#3caea3", "communal standpipe" = "#3caea3", "dam" ="#3caea3", "hand pump" ="#3caea3", "imporved spring" ="#3caea3", "other" ="#3caea3")) +
+  labs(subtitle = "Waterpoint Type") +
+  theme_minimal() + 
+  theme(legend.position = "none")
+
+
+waterpoints %>%
+  ggplot(aes(source_class, source, color = source_class)) +
+  geom_count() +
+  scale_color_manual(values = c("groundwater" = "#3caea3", "surface" = "#3caea3", "unknown" ="#3caea3")) +
+  labs(subtitle = "Waterpoint Source", 
+       caption = "Alex Doyle | DrivenData | TaarifaWaterpoints") +
+  theme_minimal() + 
+  theme(legend.position = "none")
+
+
+```
+
+
+
+ 
+
+\newpage
+
+### 2.3 Training The Model
+
+Taking the information regarding repetition a subset of all the variables is created and this subset is partitioned into the training set and validation set. The variable's below have been selected as they were highlighted as having the greatest importance in previous models. Month and year were removed as they 
+
+|The subset variables include                   |
+|-----------------------------------------------|
+| id                    | basin                 |
+| gps_height            | population            | 
+| newlongitude *        | newlatitude *         |
+| region                | construction_year     |
+| extraction_type_class | managemennt_group     |
+| payment_type          | water_quality         |
+| quantity_group        | source_class          |
+| scheme_management     | waterpoint_type_group |
+| construction_flag *   | population_flag *     |
+| month *               | year *                |
+ * *denotes a new variable*
+
+
+
+The split between training and validation is 80:20. Finally the model is trained with the random forest classifier on the training data. 
+
+```{r subsetting training data, include=FALSE}
+# Joining the labels and the values together
+partitions <- waterpoints %>%
+  select(id,
+         gps_height, 
+         newlongitude,
+         construction_year, 
+         extraction_type_class,
+         payment_type,
+         water_quality, 
+         quantity_group, 
+         source_class,
+         status_group, 
+         contstuction_flag, 
+         pop_flag, 
+         population, newlatitude)  %>%
+  sdf_random_split(training = 0.8, testing = 0.2, seed = 42)
+
+water_train <- partitions$training # 80% of the data in training
+water_test <- partitions$testing # 20% of the data in test   
+```
+
+
+
+
+```{r training the model}
+rf_model <- water_train %>%
+ ml_random_forest(status_group ~ ., type = "classification")
+
+```
+
+### 2.4 Preparing the test data
+
+To ensure the test data will run on the trained model it is important it is subject to the same transformations as the trained data. The following chunks outline the same transformations applied to the training data previous. 
+
+```{r test locations, include=FALSE}
+# Reapplying the functions to the test data 
+test_data <- test_data %>%
+  filter(!is.na(date_recorded)) %>%
+  mutate(newlongitude = case_when(longitude == 0 & region == "Arusha" ~ 36.55407, 
+                                  longitude == 0 & region == "Dar es Saleem" ~ 39.21294,
+                                  longitude == 0 & region == "Dodoma" ~ 36.04196,
+                                  longitude == 0 & region == "Iringa" ~ 34.89592,
+                                  longitude == 0 & region == "Kagera" ~ 31.23309,
+                                  longitude == 0 & region == "Kigoma" ~30.21889,
+                                  longitude == 0 & region == "Kilimanjaro" ~ 37.50546,
+                                  longitude == 0 & region == "Lindi" ~ 38.98799,
+                                  longitude == 0 & region == "Manyara" ~ 35.92932,
+                                  longitude == 0 & region == "Mara" ~ 34.15698,
+                                  longitude == 0 & region == "Mbeya" ~ 33.53351,
+                                  longitude == 0 & region == "Morogoro" ~ 37.04678,
+                                  longitude == 0 & region == "Mtwara" ~ 37.38862,
+                                  longitude == 0 & region == "Mwanza" ~ 33.09477,
+                                  longitude == 0 & region == "Pwani" ~ 38.88372,
+                                  longitude == 0 & region == "Rukwa" ~ 31.29116,
+                                  longitude == 0 & region == "Ruvuma" ~ 35.72784,
+                                  longitude == 0 & region == "Shinyanga" ~ 33.24037,
+                                  longitude == 0 & region == "Singida" ~ 37.3950,
+                                  longitude == 0 & region == "Tabora" ~ 32.87830,
+                                  longitude == 0 & region == "Tanga" ~ 38.50195, 
+                                  TRUE ~ longitude
+                                  )) %>%
+  mutate(newlatitude = case_when(latitude == -0.00000002 & region == "Arusha" ~ -3.2464455, 
+                                  latitude == -0.00000002 & region == "Dar es Saleem" ~ -6.909677,
+                                  latitude == -0.00000002 & region == "Dodoma" ~ -5.928734,
+                                  latitude == -0.00000002 & region == "Iringa" ~ -8.907700,
+                                  latitude == -0.00000002 & region == "Kagera" ~ -1.961466,
+                                  latitude == -0.00000002 & region == "Kigoma" ~ -4.296219,
+                                  latitude == -0.00000002 & region == "Kilimanjaro" ~ -3.522823,
+                                  latitude == -0.00000002 & region == "Lindi" ~ -9.775687,
+                                  latitude == -0.00000002 & region == "Manyara" ~ -4.256211,
+                                  latitude == -0.00000002 & region == "Mara" ~ -1.739903,
+                                  latitude == -0.00000002 & region == "Mbeya" ~ -9.097418,
+                                  latitude == -0.00000002 & region == "Morogoro" ~ -7.411562,
+                                  latitude == -0.00000002 & region == "Mtwara" ~ --10.680456,
+                                  latitude == -0.00000002 & region == "Mwanza" ~ -1.938766,
+                                  latitude == -0.00000002 & region == "Pwani" ~ -7.009954,
+                                  latitude == -0.00000002 & region == "Rukwa" ~ -7.359283,
+                                  latitude == -0.00000002 & region == "Ruvuma" ~ -10.774379,
+                                  latitude == -0.00000002 & region == "Shinyanga" ~ -2.790522,
+                                  latitude == -0.00000002 & region == "Singida" ~ -4.9046622,
+                                  latitude == -0.00000002 & region == "Tabora" ~ -4.722600,
+                                  latitude == -0.00000002 & region == "Tanga" ~ -5.070863,
+                                  TRUE ~ latitude
+                                  ))
+```
+
+
+```{r test date, include=FALSE}
+
+
+test_time <- test_data %>% 
+  select(id, date_recorded) %>%
+  mutate(B = split(date_recorded, "-")) %>%
+  sdf_separate_column("B", into = c("year", "m", "d")) %>% 
+  mutate(month = case_when(m == "01" ~ "January", 
+                           m == "02" ~ "February", 
+                           m == "03" ~ "March", 
+                           m == "04" ~ "April", 
+                           m == "05" ~ "May", 
+                           m == "06" ~ "June", 
+                           m == "07" ~ "July", 
+                           m == "08" ~ "August", 
+                           m == "09" ~ "Septmember", 
+                           m == "10" ~ "October", 
+                           m == "11" ~ "November", 
+                           m == "12" ~ "December", 
+                           TRUE ~ m)) %>%
+  select(id, month, year)
+
+
+
+
+test_data <- test_data %>%
+  left_join(test_time, by = "id")
+
+```
+
+```{r test population, include=FALSE}
+# Lots of zeros time to try a flag
+
+test_data <- test_data %>%
+  mutate(pop_flag = ifelse(population == 0, "0", "1")) %>%
+  mutate(contstuction_flag = ifelse(construction_year == 0, "0", "1")) %>%
+  na.replace(scheme_management = "NA")
+
+
+```
+
+
+```{r subsetting test data, include=FALSE}
+# Joining the labels and the values together
+cleaned_test <- test_data %>%
+  select(id,
+         gps_height, 
+         newlongitude,
+         construction_year, 
+         extraction_type_class,
+         payment_type,
+         water_quality, 
+         quantity_group, 
+         source_class,
+         contstuction_flag, 
+         pop_flag, 
+         population, newlatitude) 
+
+
+
+
+``` 
+
+## 3.0 Results 
+
+```{r validating model, include=FALSE}
+rf_predict <- ml_predict(rf_model, water_test) %>% # validatiion set
+  ft_string_indexer("status_group", "status_group_idx") 
+  
+validation_score <- ml_multiclass_classification_evaluator(rf_predict) 
+
+validation_score <- round(validation_score * 100, 1)
+
+rf_predict%>%
+  collect # collecting the variables 
+
+ table(rf_predict$status_group, rf_predict$predicted_label) # confusion matrix 
+
+
+```
+
+### 3.1 Validation Results
+
+First glances at the results shown in the confusion matrix are interesting. In the validation set it appears the model does not select any waterpoints to be in `functional need repair` resulting in an odd-looking confusion matrix. This may be caused by the small size of the `functional need repair` group. 
+The number of waterpoints classified as `non functional` but predicted to be functional is still very high but the accuracy of predicting `non functaional` wells is very encouraging. The accuracy of the model on the validation data `r validation_score`%
+
+### 3.2 Test Data Accuracy
+
+To really test the model a `.csv` file with the predictions needs to be written and submitted to the DataDriven website. The code chunk below runs the test data on the model and writes it to a `.csv` file. There is some additional reordering and filling in required with the requisite code available on my [Github page](https://github.com/alexdoyle115/C7084_Big_Data/blob/main/formatting_submission.R)
+
+When the `.csv`file is submitted to the DrivenData website the resulting accuracy is 70.09%. This result while a little disappointing is still reasonable being in the top 30% of all submissions.
+
+![Results](/Users/alexd/Desktop/C7084-Assignment/result.png)
+
+```{r submission csv , echo = FALSE}
+
+test_results <- ml_predict(rf_model, cleaned_test) %>% 
+  select(id, predicted_label)
+
+submission <- test_results %>%
+  collect
+
+head(submission)
+spark_write_csv(test_results, "file:///Users/alexd/Desktop/C7084-Assignment/results")
+
+
+```
+### 3.3 Variable importance
+
+As most of the data consists of discrete classes it results in a large number of dummy variables. These dummy variables give a good insight into which variables have the grates impact on the overall model. Clearly `quantity_group`and `extraction_type_class` have the biggest impact on the condition of the wells. It's interesting to see the `newlongitude`has more of a relationship than `newlatitude`. 
+
+```{r variable importance, echo = FALSE}
+variables <- ml_tree_feature_importance(rf_model) %>%
+  collect
+
+# plotting importance 
+
+variables %>%
+  slice_max(importance, n = 15) %>% 
+  mutate(feature = fct_reorder(feature, importance)) %>%
+ggplot(aes(importance, feature )) +
+  geom_col(fill = "#3caea3", color ="#17423e") + 
+  labs(x = "Factor Importance", 
+       y = "Feature", 
+       title = "Top 10 most important dummy varibales", 
+       caption = "Alex Doyle | DrivenData | TaarifaWaterpoints") +
+  theme_minimal() + 
+  theme(plot.background = element_rect(fill = "white"), 
+        panel.background = element_rect(fill = "white",
+                                        colour = "white",
+                                size = 0.5, linetype = "solid"),
+        legend.position = "none")
+
+
+```
+
+### 3.4 EDA 
+
+Taking some of the variables that appear to be important in the classifier and examining closely it is clear to see why there may be a relationship. Firstly, looking at the graph in Fig 3.1 which is exploring the relationship between the quantity available and the well status, it is obvious that wells considered to be in the "dry" class are more likely to be `non functional`. The wells considered to have `enough` also appear in the 15 most important variables but further down. 
+
+
+```{r contingency table, include=FALSE}
+# Contingency table to compare the states of the wells 
+contingency <- water_train %>%
+  sdf_crosstab("status_group", "quantity_group") %>%
+  collect()
+
+
+```
+
+Fig. 3.1
+
+```{r moasic plot, echo=FALSE}
+contingency %>%
+  rename(status_group = status_group_quantity_group) %>%
+  gather("quantity","count", dry:unknown) %>%
+  mutate(
+    status_group = as_factor(status_group) %>%
+      fct_relevel("functional", "functional needs repair", "non functional"), 
+    quantity = as_factor(quantity) %>%
+      fct_relevel("enough", "seasonal", "insufficient", "dry", "unknown")
+) %>%
+  ggplot() +
+  labs(title = "Contingency Table", 
+       subtitle = "Mosaic plot of the wells status and quantity of water deemed available at each well", 
+       y = "", 
+       x = "Quantity of water available", 
+       caption = "Alex Doyle | DrivenData | TaarifaWaterpoints")+
+  geom_mosaic(aes(x = product(status_group, quantity), fill = status_group, 
+                  weight = count)) +
+  annotate(geom = "text", x = 0.27, y = -0.035, label = "Enough", 
+           colour = "black", size = 3.5) +
+  annotate(geom = "text", x = 0.58, y = -0.035, label = "Seasonal", 
+           colour = "black", size = 3.5) +
+  annotate(geom = "text", x = 0.75, y = -0.035, label = "Insufficent", 
+           colour = "black", size = 3.5) +
+  annotate(geom = "text", x = 0.925, y = -0.035, label = "Dry", 
+           colour = "black", size = 3.5) +
+  annotate(geom = "text", x = 1, y = -0.035, label = "Unknown", 
+           colour = "black", size = 3.5) + 
+  scale_fill_manual(values = c("#3caea3", "#f6d55c", "#ed553b"), name = "Well Status", 
+                    labels = c("Functional", "Functional Needs Repair", "Non Functional")) +
+  theme(legend.position = "bottom",
+        legend.direction = "horizontal", 
+        legend.background = element_rect(fill = "white"),
+        legend.key = element_rect(fill = "white"), 
+        plot.background = element_rect(fill = "white"), 
+        panel.background = element_rect(fill = "white",
+                                        colour = "white",
+                                size = 0.5, linetype = "solid"), 
+        panel.grid.major = element_blank()) 
+  
+
+
+```
+It is very similar in Fig 3.2 and Fig 3.3, both graphs show that the overwhelming majority of waterpoints classified as `other` are non functional. 
+Fig. 3.2 
+
+```{r sources, echo = FALSE}
+# The various sources of water majority come from gravity and handpump
+water_train %>%
+  ggplot(aes(extraction_type_class, fill = status_group)) +
+  geom_bar(stat = "count", width = .55) +
+  scale_fill_manual(values = c("functional" = "#3caea3", "functional needs repair"  = "#f6d55c", "non functional" = "#ed553b")) +
+  labs(title = "Proportion of Waterpoints according to Extraction method", 
+       x = "Extraction Method", 
+       y = "Number of Waterpoints", 
+       caption = "Alex Doyle | DrivenData | TaarifaWaterpoints") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1), 
+        legend.position = c(0.8, 0.8)) 
+```
+Fig 3.3 
+```{r waterpoints , echo=FALSE}
+waterpoints %>%
+  filter(waterpoint_type_group %in% c("other", "hand pump", "communal standpipe")) %>% 
+  ggplot(aes(waterpoint_type_group, fill =  status_group)) +
+  geom_bar(stat ="count") +
+  scale_fill_manual(values = c("#3caea3", "#f6d55c", "#ed553b"), name = "Well Status", 
+                    labels = c("Functional", "Functional Needs Repair", "Non Functional")) +
+  labs(x = "Waterpoint Type", 
+       y = "number of Waterpoints",
+       title = "Comparrison of the the condition of wells in Tanzania", 
+       caption = "Alex Doyle | DrivenData | TaarifaWaterpoints") +
+  theme_classic() +
+  theme(legend.position = c(0.8, 0.8)) 
+
+```
+
+
+## 4.0 Discussion 
+
+With top teams in the DataDriven: Pump it Up challenge managing a classification rate of over 82% there is certainly room for improvement of the model in this analysis but there is certainly potential. However, exploring scripts on Github that have tackled the same problem none have been identified to by suitable for working with Spark. The variables that have been identified as being important within the decision tree are useful, but it is worth noting the limitations of decision trees and random forest in their ability to attribute a relationship between variables (Efron, B., 2020)
+
+As the Taarifa waterpoints dataset continues to grow and expand out into various other countries the volume of data will surely enter the relm of "Big Data". Scaling out to manage this as opposed to buying more powerful computer's is the most practical option for dealing with big data in most scenarios and particularly in developing countries. This analysis has shown the relative simplicity of carrying out such an analysis on a Spark connection. If this work were aimed at being utilised further the next step would be to create a cluster and carry out the analysis over multiple machines to reduce the time it takes to run the model. 
+
+## 5.0 Literature
+
+Efron, B., 2020. Prediction, estimation, and attribution. International Statistical Review, 88, pp.S28-S59.
+
+MacArthur, J., 2015. Handpump standardisation in sub-Saharan Africa. RWSN Publication, 1.
+
+Sophocleous, M., 2004. Global and regional water availability and demand: prospects for the future. Natural Resources Research, 13(2), pp.61-75.
+
+Kausley, S.B., Dastane, G.G., Kumar, J.K., Desai, K.S., Doltade, S.B. and Pandit, A.B., 2018. Clean Water for Developing Countries: Feasibility of Different Treatment Solutions. Encyclopedia of Environmental Health.
+
+Wateraid, ODI 2005 Learning for advocacy and good practice-WaterAid
+water point mapping. Prepared by Katharina Welle, Water Policy
+Programme, Overseas Development Institute, 111 Westminster
+Bridge Road, London SE1 7JD, United Kingdom
